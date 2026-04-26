@@ -1,0 +1,58 @@
+{
+  "names": [
+    "Jan",
+    "Janek"
+  ],
+  "surnames": [
+    "Kowalski"
+  ],
+  "nicknames": [
+    "jkowal",
+    "kowal98"
+  ],
+  "cities": [
+    "Kraków",
+    "Nowa Huta"
+  ],
+  "pets": [
+    "Burek"
+  ],
+  "companies": [
+    "Acme Polska"
+  ],
+  "hobbies": [
+    "rower",
+    "gitara",
+    "szachy"
+  ],
+  "teams": [
+    "Wisła"
+  ],
+  "schools": [
+    "Politechnika"
+  ],
+  "keywords": [
+    "projekt",
+    "firma",
+    "demo"
+  ],
+  "dates": [
+    "1998-04-12",
+    "12.04.1998"
+  ],
+  "years": [
+    "1998",
+    "2024",
+    "2025"
+  ],
+  "numbers": [
+    "123",
+    "321",
+    "007"
+  ],
+  "symbols": [
+    "!",
+    "@",
+    "#"
+  ]
+}

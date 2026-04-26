@@ -1,0 +1,23 @@
+[project]
+name = "gamma_ray"
+version = "0.1.0"
+description = "Defensywny generator spersonalizowanych wordlist po polsku."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Your Name" }
+]
+keywords = ["security", "wordlist", "hashcat", "python", "polish"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Security",
+  "Topic :: Utilities"
+]
+
+[project.scripts]
+gamma_ray = "gamma_ray:main"
+
+[tool.black]
+line-length = 100

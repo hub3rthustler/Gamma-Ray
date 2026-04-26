@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Output
+out/
+*.wordlist
+*.dict
+*.txt.gz
+
+# Local/private profiles
+profiles/
+*.private.json
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
