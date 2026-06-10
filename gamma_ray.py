@@ -15,9 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-
 
 POLISH_ASCII_MAP = str.maketrans({
     "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
@@ -51,7 +48,7 @@ class Options:
     separators: tuple[str, ...]
     ascii_only: bool
     include_unicode: bool
-    leet: bool
+    leet_level: str
     depth: int
 
 
@@ -91,6 +88,64 @@ def case_variants(value: str) -> Iterator[str]:
         yield value[0].upper() + value[1:].lower()
 
 
+MONTH_VARIANTS: dict[str, tuple[str, ...]] = {
+    "01": ("styczen", "styczeń", "stycznia", "sty"),
+    "02": ("luty", "lutego", "lut"),
+    "03": ("marzec", "marca", "mar"),
+    "04": ("kwiecien", "kwiecień", "kwietnia", "kwi"),
+    "05": ("maj", "maja"),
+    "06": ("czerwiec", "czerwca", "cze"),
+    "07": ("lipiec", "lipca", "lip"),
+    "08": ("sierpien", "sierpień", "sierpnia", "sie"),
+    "09": ("wrzesien", "wrzesień", "wrzesnia", "września", "wrz"),
+    "10": ("pazdziernik", "październik", "pazdziernika", "października", "paz", "paź"),
+    "11": ("listopad", "listopada", "lis"),
+    "12": ("grudzien", "grudzień", "grudnia", "gru"),
+}
+
+
+def _looks_like_date_parts(dd: str, mm: str, yyyy: str) -> bool:
+    try:
+        day = int(dd)
+        month = int(mm)
+        year = int(yyyy)
+    except ValueError:
+        return False
+    return 1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2099
+
+
+def _date_candidates_from_parts(dd: str, mm: str, yyyy: str) -> Iterator[str]:
+    if not _looks_like_date_parts(dd, mm, yyyy):
+        return
+
+    yy = yyyy[-2:]
+
+    # Compact numeric variants.
+    for candidate in (
+        yyyy, yy,
+        dd + mm + yyyy, dd + mm + yy,
+        yyyy + mm + dd, yy + mm + dd,
+        dd + mm, mm + yyyy, mm + yy,
+    ):
+        yield candidate
+
+    # Numeric variants with common separators.
+    for sep in (".", "-", "_"):
+        yield sep.join((dd, mm, yyyy))
+        yield sep.join((dd, mm, yy))
+        yield sep.join((yyyy, mm, dd))
+        yield sep.join((yy, mm, dd))
+
+    # Polish month-name variants, useful for Polish personal wordlists.
+    for month_name in MONTH_VARIANTS.get(mm, ()): 
+        yield f"{dd}{month_name}{yyyy}"
+        yield f"{dd}{month_name}{yy}"
+        yield f"{month_name}{yyyy}"
+        yield f"{month_name}{yy}"
+        yield f"{dd}_{month_name}_{yyyy}"
+        yield f"{dd}-{month_name}-{yyyy}"
+
+
 def date_variants(value: str) -> Iterator[str]:
     raw = normalize_space(value)
     if not raw:
@@ -100,15 +155,23 @@ def date_variants(value: str) -> Iterator[str]:
     if compact:
         yield compact
 
-    # YYYYMMDD -> YYYY, YY, DDMMYYYY, DDMMYY
+    # YYYYMMDD or DDMMYYYY -> expanded numeric and Polish month variants.
     if re.fullmatch(r"\d{8}", compact):
         if compact[:2] in {"19", "20"}:
             yyyy, mm, dd = compact[:4], compact[4:6], compact[6:8]
         else:
             dd, mm, yyyy = compact[:2], compact[2:4], compact[4:8]
-        yy = yyyy[-2:]
-        for candidate in (yyyy, yy, dd + mm + yyyy, dd + mm + yy, yyyy + mm + dd, dd + mm):
-            yield candidate
+        yield from _date_candidates_from_parts(dd, mm, yyyy)
+
+    # DDMMYY or YYMMDD -> compact short-date variants.
+    if re.fullmatch(r"\d{6}", compact):
+        dd, mm, yy = compact[:2], compact[2:4], compact[4:6]
+        if 1 <= int(mm) <= 12 and 1 <= int(dd) <= 31:
+            for sep in ("", ".", "-", "_"):
+                if sep:
+                    yield sep.join((dd, mm, yy))
+                else:
+                    yield dd + mm + yy
 
     # Keep year-looking values.
     for year in re.findall(r"(?:19|20)\d{2}", raw):
@@ -136,8 +199,12 @@ def token_variants(token: str, options: Options) -> list[str]:
         variants.extend(case_variants(item))
         variants.extend(date_variants(item))
 
-    if options.leet:
-        variants.extend(leet_variants(v) for v in list(variants))
+    if options.leet_level != "off":
+        variants.extend(
+            leet_variant
+            for variant in list(variants)
+            for leet_variant in leet_variants(variant, options.leet_level)
+        )
 
     cleaned = []
     for item in variants:
@@ -154,16 +221,52 @@ def token_variants(token: str, options: Options) -> list[str]:
     return dedupe_keep_order(cleaned)
 
 
-def leet_variants(value: str, max_changes: int = 2) -> str:
-    chars = list(value)
-    changes = 0
-    for index, char in enumerate(chars):
-        lower = char.lower()
-        if lower in LEET_TABLE and changes < max_changes:
-            replacement = LEET_TABLE[lower][0]
-            chars[index] = replacement
-            changes += 1
-    return "".join(chars)
+def leet_variants(value: str, level: str = "light") -> Iterator[str]:
+    """Generate controlled leet variants without exploding the wordlist size.
+
+    Levels:
+    - light: one substitution at a time, first replacement only.
+    - medium: one or two substitutions, up to two replacements per character.
+    - aggressive: up to three substitutions and all configured replacements.
+    """
+    if level == "off" or not value:
+        return
+
+    settings = {
+        "light": {"max_changes": 1, "max_positions": 8, "max_replacements": 1, "limit": 40},
+        "medium": {"max_changes": 2, "max_positions": 10, "max_replacements": 2, "limit": 160},
+        "aggressive": {"max_changes": 3, "max_positions": 12, "max_replacements": 99, "limit": 500},
+    }
+    config = settings.get(level, settings["light"])
+
+    positions: list[tuple[int, tuple[str, ...]]] = []
+    for index, char in enumerate(value):
+        replacements = LEET_TABLE.get(char.lower())
+        if replacements:
+            positions.append((index, replacements[: config["max_replacements"]]))
+        if len(positions) >= config["max_positions"]:
+            break
+
+    seen: set[str] = set()
+    produced = 0
+    max_changes = min(config["max_changes"], len(positions))
+
+    for changes_count in range(1, max_changes + 1):
+        for selected_positions in itertools.combinations(positions, changes_count):
+            indexes = [item[0] for item in selected_positions]
+            replacement_sets = [item[1] for item in selected_positions]
+            for replacements in itertools.product(*replacement_sets):
+                chars = list(value)
+                for index, replacement in zip(indexes, replacements):
+                    chars[index] = replacement
+                candidate = "".join(chars)
+                if candidate == value or candidate in seen:
+                    continue
+                seen.add(candidate)
+                yield candidate
+                produced += 1
+                if produced >= config["limit"]:
+                    return
 
 
 def load_profile(path: Path | None) -> list[str]:
@@ -289,7 +392,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--separators", default='"",.,_,-', help='Separatory rozdzielone przecinkami, np. "\\"\\",.,_,-".')
     parser.add_argument("--ascii-only", action="store_true", help="Zapisuj wyłącznie warianty ASCII.")
     parser.add_argument("--include-unicode", action="store_true", help="Dołącz warianty z polskimi znakami UTF-8.")
-    parser.add_argument("--leet", action="store_true", help="Włącz konserwatywne mutacje leet.")
+    parser.add_argument("--leet", action="store_true", help="Alias zgodności: włącza --leet-level light.")
+    parser.add_argument(
+        "--leet-level",
+        choices=("off", "light", "medium", "aggressive"),
+        default=None,
+        help="Poziom mutacji leet: off, light, medium albo aggressive.",
+    )
     parser.add_argument("--depth", type=int, choices=(1, 2), default=2, help="Głębokość łączenia tokenów.")
     parser.add_argument("--crlf", action="store_true", help="Użyj końców linii CRLF.")
     parser.add_argument("--quiet", action="store_true", help="Ogranicz komunikaty.")
@@ -307,6 +416,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_count < 1:
         parser.error("--max-count musi być większe od 0")
 
+    leet_level = args.leet_level if args.leet_level is not None else ("light" if args.leet else "off")
+
     options = Options(
         min_len=args.min_len,
         max_len=args.max_len,
@@ -314,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         separators=parse_separators(args.separators),
         ascii_only=args.ascii_only,
         include_unicode=args.include_unicode,
-        leet=args.leet,
+        leet_level=leet_level,
         depth=args.depth,
     )
 
@@ -335,6 +446,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def gui_main():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog, messagebox, ttk
+    except Exception as exc:
+        raise SystemExit(
+            "GUI mode nie jest dostępny w tej instalacji Pythona. "
+            "Uruchom skrypt z argumentami lub sprawdź konfigurację Pythona.\n"
+            f"Błąd: {exc}"
+        )
+
     root = tk.Tk()
     root.title("Gamma Ray - Generator Wordlist")
     root.geometry("600x700")
@@ -349,7 +470,7 @@ def gui_main():
     separators_var = tk.StringVar(value='"".,_,-')
     ascii_only_var = tk.BooleanVar()
     include_unicode_var = tk.BooleanVar()
-    leet_var = tk.BooleanVar()
+    leet_level_var = tk.StringVar(value="off")
     depth_var = tk.IntVar(value=2)
     crlf_var = tk.BooleanVar()
     quiet_var = tk.BooleanVar()
@@ -380,9 +501,10 @@ def gui_main():
 
     ttk.Checkbutton(root, text="Tylko ASCII", variable=ascii_only_var).grid(row=7, column=0, sticky="w", padx=5, pady=5)
     ttk.Checkbutton(root, text="Dołącz Unicode", variable=include_unicode_var).grid(row=7, column=1, sticky="w", padx=5, pady=5)
-    ttk.Checkbutton(root, text="Leet", variable=leet_var).grid(row=8, column=0, sticky="w", padx=5, pady=5)
-    ttk.Checkbutton(root, text="CRLF", variable=crlf_var).grid(row=8, column=1, sticky="w", padx=5, pady=5)
-    ttk.Checkbutton(root, text="Cichy tryb", variable=quiet_var).grid(row=9, column=0, sticky="w", padx=5, pady=5)
+    ttk.Label(root, text="Poziom leet:").grid(row=8, column=0, sticky="w", padx=5, pady=5)
+    ttk.Combobox(root, textvariable=leet_level_var, values=["off", "light", "medium", "aggressive"]).grid(row=8, column=1, sticky="w", padx=5, pady=5)
+    ttk.Checkbutton(root, text="CRLF", variable=crlf_var).grid(row=9, column=0, sticky="w", padx=5, pady=5)
+    ttk.Checkbutton(root, text="Cichy tryb", variable=quiet_var).grid(row=9, column=1, sticky="w", padx=5, pady=5)
 
     ttk.Label(root, text="Głębokość:").grid(row=10, column=0, sticky="w", padx=5, pady=5)
     ttk.Combobox(root, textvariable=depth_var, values=[1, 2]).grid(row=10, column=1, sticky="w", padx=5, pady=5)
@@ -416,7 +538,7 @@ def gui_main():
                 separators=parse_separators(separators_var.get()),
                 ascii_only=ascii_only_var.get(),
                 include_unicode=include_unicode_var.get(),
-                leet=leet_var.get(),
+                leet_level=leet_level_var.get(),
                 depth=depth_var.get(),
             )
 

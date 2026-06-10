@@ -11,7 +11,7 @@
 
 ## ✨ Co to robi?
 
-**Gamma Ray** generuje kandydatury haseł na podstawie profilu osoby, organizacji lub konta, które masz prawo audytować. Program tworzy warianty z polskimi znakami, transliteracją ASCII, zmianą wielkości liter, separatorami, datami, latami, liczbami i prostymi mutacjami typu `a -> @`.
+**Gamma Ray** generuje kandydatury haseł na podstawie profilu osoby, organizacji lub konta, które masz prawo audytować. Program tworzy warianty z polskimi znakami, transliteracją ASCII, zmianą wielkości liter, separatorami, rozbudowanymi datami, latami, liczbami i mutacjami leet w trybach `light`, `medium` oraz `aggressive`.
 
 Wynik jest zapisywany jako zwykły plik tekstowy: **jedna kandydatura na jedną linię**, czyli format przyjazny dla narzędzi typu Hashcat.
 
@@ -35,7 +35,8 @@ python3 gamma_ray.py \
   --output out/wordlist.txt \
   --min-len 6 \
   --max-len 16 \
-  --max-count 50000
+  --max-count 50000 \
+  --leet-level light
 ```
 
 Podgląd pierwszych wyników:
@@ -64,7 +65,7 @@ Plik wejściowy to zwykły JSON:
 }
 ```
 
-## � Szczegółowe wymagania dla pliku wejściowego
+## Szczegółowe wymagania dla pliku wejściowego
 
 Plik wejściowy musi być prawidłowym plikiem JSON zawierającym obiekt (słownik) z kluczami, których wartościami są tablice stringów. Wszystkie pola są **opcjonalne**, ale dla generowania sensownych wyników zaleca się wypełnienie przynajmniej kilku pól.
 
@@ -77,7 +78,7 @@ Plik wejściowy musi być prawidłowym plikiem JSON zawierającym obiekt (słown
 - **`pets`**: Tablica stringów zawierających imiona zwierząt domowych. Przykład: `["Burek", "Mruczek"]`.
 - **`hobbies`**: Tablica stringów zawierających hobby lub zainteresowania. Przykład: `["rower", "gitara", "programowanie"]`.
 - **`keywords`**: Tablica stringów zawierających słowa kluczowe związane z osobą lub organizacją. Przykład: `["firma", "projekt", "szkoła"]`.
-- **`dates`**: Tablica stringów zawierających daty w formatach `YYYY-MM-DD` (np. `"1998-04-12"`) lub `DD.MM.YYYY` (np. `"12.04.1998"`). Program automatycznie rozpozna i przetworzy te formaty.
+- **`dates`**: Tablica stringów zawierających daty w formatach `YYYY-MM-DD` (np. `"1998-04-12"`) lub `DD.MM.YYYY` (np. `"12.04.1998"`). Program automatycznie rozpozna i przetworzy te formaty na warianty kompaktowe, warianty z separatorami oraz warianty z nazwami miesięcy po polsku, np. `12041998`, `12-04-1998`, `1998_04_12`, `12kwiecien1998`, `kwiecien98`.
 - **`years`**: Tablica stringów zawierających lata jako czterocyfrowe liczby. Przykład: `["1998", "2024"]`.
 - **`numbers`**: Tablica stringów zawierających liczby lub sekwencje cyfr, które mogą być częścią haseł. Przykład: `["123", "456", "007"]`.
 - **`symbols`**: Tablica stringów zawierających symbole lub znaki specjalne do dodania do haseł. Przykład: `["!", "@", "#", "$"]`.
@@ -106,7 +107,8 @@ Opcje linii komend:
 --separators LIST       separatory, np. "",.,_,-
 --ascii-only            wymuś wyłącznie warianty ASCII
 --include-unicode       dołącz warianty z polskimi znakami UTF-8
---leet                  włącz proste zamiany typu a->@, e->3
+--leet                  alias zgodności; włącza --leet-level light
+--leet-level LEVEL      poziom mutacji leet: off, light, medium, aggressive
 --depth 1|2             głębokość łączenia tokenów
 --crlf                  zapisuj linie w stylu Windows CRLF
 --quiet                 mniej komunikatów
@@ -120,11 +122,12 @@ Pipeline:
 2. Czyszczenie pustych wartości oraz duplikatów.
 3. Normalizacja polskich znaków, np. `Kraków -> Krakow`.
 4. Tworzenie wariantów wielkości liter: `jan`, `Jan`, `JAN`.
-5. Łączenie tokenów separatorami: `jan1998`, `jan_1998`, `Jan!`.
-6. Opcjonalne mutacje leet.
-7. Filtrowanie po długości.
-8. Deduplicacja z zachowaniem kolejności.
-9. Zapis do pliku kompatybilnego z użyciem jako wordlista.
+5. Rozbudowane warianty dat, np. `12041998`, `12-04-1998`, `1998_04_12`, `12kwiecien1998`.
+6. Łączenie tokenów separatorami: `jan1998`, `jan_1998`, `Jan!`.
+7. Opcjonalne mutacje leet w trybach `light`, `medium`, `aggressive`.
+8. Filtrowanie po długości.
+9. Deduplicacja z zachowaniem kolejności.
+10. Zapis do pliku kompatybilnego z użyciem jako wordlista.
 
 ## 🧪 Test
 
@@ -160,6 +163,8 @@ gamma_ray/
 ## 🗺️ Roadmap
 
 - [x] interfejs graficzny (GUI)
+- [x] poziomy leet: `light`, `medium`, `aggressive`,
+- [x] rozszerzone warianty dat z separatorami i nazwami miesięcy po polsku,
 - [ ] eksport statystyk do JSON,
 - [ ] tryb interaktywny TUI,
 - [ ] profile branżowe dla audytu firmowego,
