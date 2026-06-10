@@ -30,13 +30,25 @@ PROFILE_FIELDS = (
 )
 
 LEET_TABLE = {
+    # Podstawowe substytucje (ASCII)
     "a": ("@", "4"),
     "e": ("3",),
     "i": ("1", "!"),
+    "l": ("1",),
     "o": ("0",),
     "s": ("5", "$"),
     "t": ("7",),
     "z": ("2",),
+    # Polskie litery — transliteracja + leet
+    "ą": ("@", "a"),   # ą → @ lub zwykłe a
+    "ć": ("c",),       # ć → c
+    "ę": ("3", "e"),   # ę → 3 lub e
+    "ł": ("l", "1"),   # ł → l lub 1
+    "ń": ("n",),       # ń → n
+    "ó": ("0", "o"),   # ó → 0 lub o
+    "ś": ("5", "s"),   # ś → 5 lub s
+    "ź": ("2", "z"),   # ź → 2 lub z
+    "ż": ("2", "z"),   # ż → 2 lub z
 }
 
 
@@ -137,7 +149,7 @@ def _date_candidates_from_parts(dd: str, mm: str, yyyy: str) -> Iterator[str]:
         yield sep.join((yy, mm, dd))
 
     # Polish month-name variants, useful for Polish personal wordlists.
-    for month_name in MONTH_VARIANTS.get(mm, ()): 
+    for month_name in MONTH_VARIANTS.get(mm, ()):
         yield f"{dd}{month_name}{yyyy}"
         yield f"{dd}{month_name}{yy}"
         yield f"{month_name}{yyyy}"
@@ -187,13 +199,18 @@ def token_variants(token: str, options: Options) -> list[str]:
     variants: list[str] = []
 
     raw_family: list[str] = []
-    if options.include_unicode and not options.ascii_only:
+
+    # Domyślnie zachowuj polskie znaki diakrytyczne — pomijaj tylko przy --ascii-only.
+    # Dawne zachowanie (wymóg --include-unicode) było błędem: wycinało polskie znaki
+    # z wynikowej listy, przez co wordlista była niekompletna dla polskich haseł.
+    if not options.ascii_only:
         raw_family.append(base)
 
-    # Hashcat processes wordlists as bytes; for portability the generator
-    # always includes transliterated ASCII variants by default.
+    # Zawsze dodaj wariant ASCII (transliteracja ą→a, ó→o itp.) dla narzędzi
+    # takich jak Hashcat, które mogą mieć problem z plikami UTF-8.
     folded = ascii_fold(base)
-    raw_family.append(folded)
+    if folded not in raw_family:
+        raw_family.append(folded)
 
     for item in dedupe_keep_order(raw_family):
         variants.extend(case_variants(item))
@@ -329,6 +346,17 @@ def generate_candidates(seed_words: Iterable[str], options: Options) -> Iterator
                 for suffix in suffix_like[:50]:
                     yield f"{left}{sep}{right}{suffix}"
 
+            # Warianty camelCase — przydatne dla polskich haseł złożonych z imienia
+            # i nazwiska, np. "janKowalski", "JanKowalski98".
+            if left and right:
+                camel = left.lower() + right[0].upper() + right[1:].lower()
+                pascal = left[0].upper() + left[1:].lower() + right[0].upper() + right[1:].lower()
+                yield camel
+                yield pascal
+                for suffix in suffix_like[:20]:
+                    yield camel + suffix
+                    yield pascal + suffix
+
 
 def bounded_candidates(seed_words: Iterable[str], options: Options) -> list[str]:
     result: list[str] = []
@@ -390,8 +418,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-len", type=int, default=24, help="Maksymalna długość kandydatury.")
     parser.add_argument("--max-count", type=int, default=100_000, help="Maksymalna liczba kandydatur.")
     parser.add_argument("--separators", default='"",.,_,-', help='Separatory rozdzielone przecinkami, np. "\\"\\",.,_,-".')
-    parser.add_argument("--ascii-only", action="store_true", help="Zapisuj wyłącznie warianty ASCII.")
-    parser.add_argument("--include-unicode", action="store_true", help="Dołącz warianty z polskimi znakami UTF-8.")
+    parser.add_argument("--ascii-only", action="store_true", help="Zapisuj wyłącznie warianty ASCII (pomija polskie znaki diakrytyczne).")
+    parser.add_argument("--include-unicode", action="store_true", help="[Przestarzałe] Polskie znaki są teraz domyślnie włączone; użyj --ascii-only aby je wyłączyć.")
     parser.add_argument("--leet", action="store_true", help="Alias zgodności: włącza --leet-level light.")
     parser.add_argument(
         "--leet-level",
@@ -439,7 +467,10 @@ def main(argv: list[str] | None = None) -> int:
     count = write_wordlist(args.output, candidates, crlf=args.crlf)
 
     if not args.quiet:
+        polish_count = sum(1 for c in candidates if any(ch in c for ch in "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"))
         print(f"[OK] Zapisano {count} kandydatur do: {args.output}")
+        if polish_count:
+            print(f"[INFO] W tym {polish_count} z polskimi znakami diakrytycznymi ({polish_count*100//count}%).")
         print("[INFO] Używaj wyłącznie w legalnych testach bezpieczeństwa i odzyskiwaniu własnego dostępu.")
 
     return 0
@@ -514,7 +545,6 @@ def gui_main():
 
     def generate():
         try:
-            # Validate
             if min_len_var.get() > max_len_var.get():
                 messagebox.showerror("Błąd", "Minimalna długość nie może być większa niż maksymalna.")
                 return
@@ -522,7 +552,6 @@ def gui_main():
                 messagebox.showerror("Błąd", "Maksymalna liczba musi być większa od 0.")
                 return
 
-            # Parse profile
             profile_path = Path(profile_var.get()) if profile_var.get() else None
             seed_words = load_profile(profile_path) + [w.strip() for w in words_var.get().split(",") if w.strip()]
             seed_words = dedupe_keep_order(normalize_space(str(word)) for word in seed_words if str(word).strip())
