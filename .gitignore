@@ -20,3 +20,4 @@ profiles/
 .DS_Store
 .idea/
 .vscode/
+examples/demo_wordlist_fictional.txt
